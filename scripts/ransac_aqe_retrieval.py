@@ -1,0 +1,142 @@
+import os
+import json
+import pickle
+import math
+import numpy as np
+import cv2
+from tqdm import tqdm
+from collections import defaultdict
+import sys
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, BASE_DIR)
+
+from config import IMAGE_DIR, VOCAB_PATH, INDEX_PATH, PARSED_GT_PATH, FEATURES_DIR, KEYPOINTS_DIR
+from config import SIFT_MAX_FEATURES, USE_ROOT_SIFT, TOP_N_PREFILTER, RANSAC_REPROJ_THRESHOLD
+from model.ROOTSIFT_feature import RootSIFTExtractor
+from tools.evaluate_map import evaluate_system
+
+def geometric_verification(query_kps, query_descs, db_kps, db_descs):
+    """RANSAC 空间校验"""
+    bf = cv2.BFMatcher(cv2.NORM_L2, crossCheck=True)
+    matches = bf.match(query_descs, db_descs)
+    if len(matches) < 4: return 0
+        
+    src_pts = np.float32([query_kps[m.queryIdx] for m in matches]).reshape(-1, 1, 2)
+    dst_pts = np.float32([db_kps[m.trainIdx] for m in matches]).reshape(-1, 1, 2)
+    
+    M, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, RANSAC_REPROJ_THRESHOLD)
+    if mask is None: return 0
+    return int(np.sum(mask))
+
+def execute_bow_search(query_weights, inverted_index, image_norms, top_n):
+    """TF-IDF 倒排索引极速查询"""
+    scores = defaultdict(float)
+    query_norm_sq = sum(w ** 2 for w in query_weights.values())
+    query_norm = math.sqrt(query_norm_sq)
+    if query_norm == 0: return []
+
+    for w, q_weight in query_weights.items():
+        if w in inverted_index:
+            for db_img, db_weight in inverted_index[w].items():
+                scores[db_img] += q_weight * db_weight
+                
+    final_scores = {img: dot / (query_norm * image_norms.get(img, 1.0)) for img, dot in scores.items()}
+    return sorted(final_scores.items(), key=lambda x: x[1], reverse=True)[:top_n]
+
+def execute_ransac_rerank(top_candidates, query_kps, query_descs):
+    """对候选列表执行 RANSAC 重排"""
+    reranked_list = []
+    for db_img_name, bow_score in top_candidates:
+        kp_path = os.path.join(KEYPOINTS_DIR, f"{db_img_name}.npy")
+        desc_path = os.path.join(FEATURES_DIR, f"{db_img_name}.npy")
+        
+        inliers = 0
+        if os.path.exists(kp_path) and os.path.exists(desc_path):
+            db_kps = np.load(kp_path)
+            db_descs = np.load(desc_path)
+            inliers = geometric_verification(query_kps, query_descs, db_kps, db_descs)
+            
+        reranked_list.append((db_img_name, inliers, bow_score))
+        
+    # 按照内点数降序，倒排分数降序
+    reranked_list.sort(key=lambda x: (x[1], x[2]), reverse=True)
+    return reranked_list
+
+def ransac_aqe_ultimate_retrieval(top_k_expand=5):
+    print("📖 加载引擎数据 (VOCAB, INDEX, GT)...")
+    with open(VOCAB_PATH, 'rb') as f: kmeans = pickle.load(f)
+    with open(INDEX_PATH, 'rb') as f: index_data = pickle.load(f)
+    with open(PARSED_GT_PATH, 'r', encoding='utf-8') as f: gt_data = json.load(f)
+        
+    extractor = RootSIFTExtractor(max_features=SIFT_MAX_FEATURES, use_rootsift=USE_ROOT_SIFT)
+    inverted_index = index_data['inverted_index']
+    idf = index_data['idf']
+    image_norms = index_data['image_norms']
+    
+    system_results = {}
+    
+    print(f"\n🚀 启动终极架构: BoW -> RANSAC校验 -> AQE扩展 -> BoW -> RANSAC终审")
+    for query_name, gt_info in tqdm(gt_data.items(), desc="全链路检索"):
+        query_img_name = gt_info['query_img']
+        bbox = gt_info['bbox']
+        query_img_path = os.path.join(IMAGE_DIR, query_img_name)
+        
+        # 0. 提取原始查询特征
+        kps, descs = extractor.extract(query_img_path, bbox=bbox)
+        if descs is None: continue
+        query_kps = np.array([kp.pt for kp in kps], dtype=np.float32)
+        
+        words = kmeans.predict(descs)
+        query_tf = defaultdict(int)
+        for w in words: query_tf[w] += 1
+        original_query_weights = {w: tf * idf[w] for w, tf in query_tf.items()}
+            
+        # ==========================================
+        # 阶段 1: 初次 BoW 检索
+        # ==========================================
+        initial_candidates = execute_bow_search(original_query_weights, inverted_index, image_norms, TOP_N_PREFILTER)
+        if not initial_candidates: continue
+            
+        # ==========================================
+        # 阶段 2: 第一次 RANSAC (寻找绝对正确的“线人”)
+        # ==========================================
+        ransac1_results = execute_ransac_rerank(initial_candidates, query_kps, descs)
+        
+        # ==========================================
+        # 阶段 3: 极其安全的 AQE 扩展
+        # ==========================================
+        # 提取经过 RANSAC 严苛校验的前 K 张图
+        top_k_imgs_verified = [img for img, inl, score in ransac1_results[:top_k_expand]]
+        
+        expanded_weights = original_query_weights.copy()
+        for w, db_docs in inverted_index.items():
+            sum_expanded_weight = 0.0
+            for img in top_k_imgs_verified:
+                if img in db_docs: sum_expanded_weight += db_docs[img]
+            if sum_expanded_weight > 0:
+                expanded_weights[w] = expanded_weights.get(w, 0) + (sum_expanded_weight / top_k_expand)
+                
+        # ==========================================
+        # 阶段 4: 扩展后的二次 BoW 检索
+        # ==========================================
+        expanded_candidates = execute_bow_search(expanded_weights, inverted_index, image_norms, TOP_N_PREFILTER)
+        
+        # ==========================================
+        # 阶段 5: 终极 RANSAC 重排
+        # ==========================================
+        # 必须用扩展后得到的新候选名单，再和【原始查询图】比对一次空间结构
+        final_ransac_results = execute_ransac_rerank(expanded_candidates, query_kps, descs)
+        
+        # 保存最终名次 (补上后缀)
+        system_results[query_name] = [f"{img}.jpg" for img, inl, sc in final_ransac_results]
+        
+    print("\n📊 正在计算终极 mAP 分数...")
+    mAP_score = evaluate_system(PARSED_GT_PATH, system_results)
+    
+    print("==================================================")
+    print(f"🏆 终局之战！RANSAC + AQE 完美融合，最终 mAP 得分: {mAP_score:.4f}")
+    print("==================================================")
+
+if __name__ == '__main__':
+    ransac_aqe_ultimate_retrieval()
