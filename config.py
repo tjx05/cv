@@ -28,7 +28,7 @@ USE_ROOT_SIFT = True          # 开启 RootSIFT 提分利器
 # ==========================================
 # 3. 词典与聚类参数 (Vocabulary & KMeans)
 # ==========================================
-VOCAB_SIZE_K = 50000         # 视觉词典大小 K 
+VOCAB_SIZE_K = 5000         # 视觉词典大小 K 
 KMEANS_BATCH_SIZE = 50000     # 小批量 K-Means 的 Batch 大小
 KMEANS_SAMPLE_RATE = 0.1      # 聚类时从 1200 万特征中随机采样的比例 (防内存溢出)
 

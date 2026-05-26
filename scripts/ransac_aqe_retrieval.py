@@ -20,14 +20,25 @@ def geometric_verification(query_kps, query_descs, db_kps, db_descs):
     """RANSAC 空间校验"""
     bf = cv2.BFMatcher(cv2.NORM_L2, crossCheck=True)
     matches = bf.match(query_descs, db_descs)
-    if len(matches) < 4: return 0
+    if len(matches) < 4: 
+        return 0,[]
         
     src_pts = np.float32([query_kps[m.queryIdx] for m in matches]).reshape(-1, 1, 2)
     dst_pts = np.float32([db_kps[m.trainIdx] for m in matches]).reshape(-1, 1, 2)
     
     M, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, RANSAC_REPROJ_THRESHOLD)
-    if mask is None: return 0
-    return int(np.sum(mask))
+    if mask is None: 
+        return 0,[]
+    
+    # ✅ 只返回 RANSAC 验证后的内点坐标
+    inlier_pts = []
+    for i, is_inlier in enumerate(mask.flatten()):
+        if is_inlier:
+            qx, qy = query_kps[matches[i].queryIdx]
+            dx, dy = db_kps[matches[i].trainIdx]
+            inlier_pts.append({'query': [float(qx), float(qy)], 'db': [float(dx), float(dy)]})
+
+    return int(np.sum(mask)),inlier_pts
 
 def execute_bow_search(query_weights, inverted_index, image_norms, top_n):
     """TF-IDF 倒排索引极速查询"""
@@ -44,7 +55,7 @@ def execute_bow_search(query_weights, inverted_index, image_norms, top_n):
     final_scores = {img: dot / (query_norm * image_norms.get(img, 1.0)) for img, dot in scores.items()}
     return sorted(final_scores.items(), key=lambda x: x[1], reverse=True)[:top_n]
 
-def execute_ransac_rerank(top_candidates, query_kps, query_descs):
+def execute_ransac_rerank(top_candidates, query_kps, query_descs,return_matches=False):
     """对候选列表执行 RANSAC 重排"""
     reranked_list = []
     for db_img_name, bow_score in top_candidates:
@@ -55,9 +66,12 @@ def execute_ransac_rerank(top_candidates, query_kps, query_descs):
         if os.path.exists(kp_path) and os.path.exists(desc_path):
             db_kps = np.load(kp_path)
             db_descs = np.load(desc_path)
-            inliers = geometric_verification(query_kps, query_descs, db_kps, db_descs)
+            inliers,match_pts = geometric_verification(query_kps, query_descs, db_kps, db_descs)
             
-        reranked_list.append((db_img_name, inliers, bow_score))
+        if return_matches:
+            reranked_list.append((db_img_name, inliers, bow_score, match_pts))
+        else:
+            reranked_list.append((db_img_name, inliers, bow_score))
         
     # 按照内点数降序，倒排分数降序
     reranked_list.sort(key=lambda x: (x[1], x[2]), reverse=True)
@@ -138,5 +152,65 @@ def ransac_aqe_ultimate_retrieval(top_k_expand=5):
     print(f"🏆 终局之战！RANSAC + AQE 完美融合，最终 mAP 得分: {mAP_score:.4f}")
     print("==================================================")
 
-if __name__ == '__main__':
-    ransac_aqe_ultimate_retrieval()
+
+def search_single_query(query_img_path, bbox=None, top_k_expand=5, final_top_n=100):
+    """
+    单张图片检索接口
+    """
+    # 加载视觉词典
+    with open(VOCAB_PATH, 'rb') as f: 
+        kmeans = pickle.load(f)
+
+    # 加载倒排索引
+    with open(INDEX_PATH, 'rb') as f: 
+        index_data = pickle.load(f)
+
+    extractor = RootSIFTExtractor(max_features=SIFT_MAX_FEATURES, use_rootsift=USE_ROOT_SIFT)
+    # 提取特征
+    kps, descs = extractor.extract(query_img_path, bbox=bbox)
+    if descs is None:
+        return []
+    
+    query_kps = np.array([kp.pt for kp in kps], dtype=np.float32)
+    
+    # 量化
+    words = kmeans.predict(descs)
+    query_tf = defaultdict(int)
+    for w in words:
+        query_tf[w] += 1
+    
+    idf=index_data['idf']
+    inverted_index=index_data['inverted_index']
+    image_norms=index_data['image_norms']
+
+    original_query_weights = {w: tf * idf[w] for w, tf in query_tf.items()}
+    
+    # 初次检索
+    initial_ranking = execute_bow_search(original_query_weights, inverted_index, image_norms, TOP_N_PREFILTER)
+    if not initial_ranking:
+        return []
+    
+    # RANSAC 校验
+    ransac1_results = execute_ransac_rerank(initial_ranking, query_kps, descs)
+    
+    # AQE 扩展
+    top_k_imgs = [img for img, inl, score in ransac1_results[:top_k_expand]]
+    expanded_weights = original_query_weights.copy()
+    for w, db_docs in inverted_index.items():
+        sum_weight = 0.0
+        for img in top_k_imgs:
+            if img in db_docs:
+                sum_weight += db_docs[img]
+        if sum_weight > 0:
+            expanded_weights[w] = expanded_weights.get(w, 0) + (sum_weight / top_k_expand)
+    
+    # 二次检索
+    final_ranking = execute_bow_search(expanded_weights, inverted_index, image_norms, TOP_N_PREFILTER)
+    
+    # 终极 RANSAC
+    final_results = execute_ransac_rerank(final_ranking, query_kps, descs,return_matches=True)
+    
+    return final_results[:final_top_n]
+
+# if __name__ == '__main__':
+#     ransac_aqe_ultimate_retrieval()

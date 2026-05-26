@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>图像检索系统</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/base.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/index.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1 class="page-title">图像检索系统</h1>
+        <div class="main-content">
+            <!-- 左侧操作区 -->
+            <div class="left-panel">
+                <h3 class="panel-title">操作设置</h3>
+                <div class="upload-box" id="uploadBtn">
+                    <p class="upload-text">点击上传图片</p>
+                    <input type="file" id="file-input" accept="image/*">
+                </div>
+                <div class="preview-area">
+                    <img id="pre-img">
+                    <span class="empty-text" id="emptyTip">暂无预览图</span>
+                </div>
+                <div class="check-group">
+                    <div class="check-item">
+                        <input type="checkbox" id="showTime" checked> 显示检索耗时
+                    </div>
+                    <div class="check-item">
+                        <input type="checkbox" id="showKeypoints"> 显示特征关键点
+                        <div id="kp_display_options" class="kp-options">
+                            <label class="kp-btn">
+                                <input type="radio" name="kp_display_mode" value="all" checked>
+                                显示全部关键点
+                            </label>
+                            <label class="kp-btn">
+                                <input type="radio" name="kp_display_mode" value="matches">
+                                仅仅显示匹配点
+                            </label>
+                        </div>
+                    </div>
+                </div>
+                <button class="search-btn" id="search">开始检索</button>
+            </div>
+
+            <!-- 中间结果区 -->
+            <div class="mid-panel">
+                <h3 class="panel-title">匹配结果</h3>
+                <div class="result-wrap" id="resultBox">
+                    <div class="empty-result">上传图像后展示相似结果</div>
+                </div>
+            </div>
+
+            <!-- 右侧参数区 -->
+            <div class="right-panel">
+                <h3 class="panel-title">参数调节</h3>
+                <div class="param-item">
+                    <div class="param-label">返回图片数量 N</div>
+                    <input type="range" min="1" max="10" value="4" id="sliderN">
+                    <div class="param-num">当前：<span id="valN">4</span></div>
+                </div>
+                <div class="param-item">
+                    <div class="param-label">特征匹配阈值</div>
+                    <input type="range" min="10" max="90" value="50" id="sliderTh">
+                    <div class="param-num">当前阈值：<span id="valTh">50</span> %</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
