@@ -31,8 +31,9 @@ def search():
     if file.filename=='':
         return jsonify({'success': False,'error': '未选择文件'})
     
-    # # 获取返回数量参数
+    # 获取返回数量参数
     top_k=int(request.form.get('top_k',10))
+    threshold=float(request.form.get('threshold',5.0)) 
 
     # 保存临时文件
     suffix = os.path.splitext(file.filename)[1] or '.jpg'
@@ -42,7 +43,7 @@ def search():
 
     try:
         # 单张检索函数
-        results=search_single_query(tmp_path,bbox=None,final_top_n=top_k)
+        results=search_single_query(tmp_path,bbox=None,final_top_n=top_k,ransac_thresh=threshold)
         
         # 格式化返回结果
         formatted_results=[]

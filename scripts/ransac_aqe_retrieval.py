@@ -16,7 +16,7 @@ from config import SIFT_MAX_FEATURES, USE_ROOT_SIFT, TOP_N_PREFILTER, RANSAC_REP
 from model.ROOTSIFT_feature import RootSIFTExtractor
 from tools.evaluate_map import evaluate_system
 
-def geometric_verification(query_kps, query_descs, db_kps, db_descs):
+def geometric_verification(query_kps, query_descs, db_kps, db_descs,ransac_thresh=5.0):
     """RANSAC 空间校验"""
     bf = cv2.BFMatcher(cv2.NORM_L2, crossCheck=True)
     matches = bf.match(query_descs, db_descs)
@@ -26,11 +26,11 @@ def geometric_verification(query_kps, query_descs, db_kps, db_descs):
     src_pts = np.float32([query_kps[m.queryIdx] for m in matches]).reshape(-1, 1, 2)
     dst_pts = np.float32([db_kps[m.trainIdx] for m in matches]).reshape(-1, 1, 2)
     
-    M, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, RANSAC_REPROJ_THRESHOLD)
+    M, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, ransac_thresh)
     if mask is None: 
         return 0,[]
     
-    # ✅ 只返回 RANSAC 验证后的内点坐标
+    # 只返回 RANSAC 验证后的内点坐标
     inlier_pts = []
     for i, is_inlier in enumerate(mask.flatten()):
         if is_inlier:
@@ -55,7 +55,7 @@ def execute_bow_search(query_weights, inverted_index, image_norms, top_n):
     final_scores = {img: dot / (query_norm * image_norms.get(img, 1.0)) for img, dot in scores.items()}
     return sorted(final_scores.items(), key=lambda x: x[1], reverse=True)[:top_n]
 
-def execute_ransac_rerank(top_candidates, query_kps, query_descs,return_matches=False):
+def execute_ransac_rerank(top_candidates, query_kps, query_descs,return_matches=False,ransac_thresh=5.0):
     """对候选列表执行 RANSAC 重排"""
     reranked_list = []
     for db_img_name, bow_score in top_candidates:
@@ -66,7 +66,7 @@ def execute_ransac_rerank(top_candidates, query_kps, query_descs,return_matches=
         if os.path.exists(kp_path) and os.path.exists(desc_path):
             db_kps = np.load(kp_path)
             db_descs = np.load(desc_path)
-            inliers,match_pts = geometric_verification(query_kps, query_descs, db_kps, db_descs)
+            inliers,match_pts = geometric_verification(query_kps, query_descs, db_kps, db_descs,ransac_thresh)
             
         if return_matches:
             reranked_list.append((db_img_name, inliers, bow_score, match_pts))
@@ -153,7 +153,7 @@ def ransac_aqe_ultimate_retrieval(top_k_expand=5):
     print("==================================================")
 
 
-def search_single_query(query_img_path, bbox=None, top_k_expand=5, final_top_n=100):
+def search_single_query(query_img_path, bbox=None, top_k_expand=5, final_top_n=100, ransac_thresh=5.0):
     """
     单张图片检索接口
     """
@@ -191,7 +191,7 @@ def search_single_query(query_img_path, bbox=None, top_k_expand=5, final_top_n=1
         return []
     
     # RANSAC 校验
-    ransac1_results = execute_ransac_rerank(initial_ranking, query_kps, descs)
+    ransac1_results = execute_ransac_rerank(initial_ranking, query_kps, descs,return_matches=False,ransac_thresh=ransac_thresh)
     
     # AQE 扩展
     top_k_imgs = [img for img, inl, score in ransac1_results[:top_k_expand]]
@@ -208,7 +208,7 @@ def search_single_query(query_img_path, bbox=None, top_k_expand=5, final_top_n=1
     final_ranking = execute_bow_search(expanded_weights, inverted_index, image_norms, TOP_N_PREFILTER)
     
     # 终极 RANSAC
-    final_results = execute_ransac_rerank(final_ranking, query_kps, descs,return_matches=True)
+    final_results = execute_ransac_rerank(final_ranking, query_kps, descs,return_matches=True,ransac_thresh=ransac_thresh)
     
     return final_results[:final_top_n]
 
