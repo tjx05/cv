@@ -4,6 +4,7 @@ import base64
 import cv2
 import numpy as np
 import tempfile
+import json
 
 from config import IMAGE_DIR,KEYPOINTS_DIR
 from scripts.ransac_aqe_retrieval import search_single_query
@@ -35,6 +36,16 @@ def search():
     top_k=int(request.form.get('top_k',10))
     threshold=float(request.form.get('threshold',5.0)) 
 
+    # 获取 bbox（如果有）
+    bbox_str = request.form.get('bbox', None)
+    bbox = None
+    if bbox_str:
+        try:
+            bbox=json.loads(bbox_str)
+            print(f"使用 bbox: {bbox}")
+        except:
+            pass
+
     # 保存临时文件
     suffix=os.path.splitext(file.filename)[1] or '.jpg'
     with tempfile.NamedTemporaryFile(suffix=suffix,delete=False) as tmp:
@@ -43,7 +54,7 @@ def search():
 
     try:
         # 单张检索函数
-        results=search_single_query(tmp_path,bbox=None,final_top_n=top_k,ransac_thresh=threshold)
+        results=search_single_query(tmp_path,bbox=bbox,final_top_n=top_k,ransac_thresh=threshold)
         
         # 格式化返回结果
         formatted_results=[]

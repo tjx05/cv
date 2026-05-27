@@ -272,11 +272,17 @@ async function showImageWithAllKeypoints(imgUrl, kpUrl) {
 async function showImageWithMatches(imgUrl, matches) {
     try {
         // 同时加载查询图和匹配图
-        const queryImgUrl = preImg.src;  // 用户上传的查询图
+        const queryImgUrl = preImg.src;
         const [queryImg, dbImg] = await Promise.all([
             loadImage(queryImgUrl),
             loadImage(imgUrl)
         ]);
+        
+        // ========== 获取当前 bbox 偏移 ==========
+        const currentBbox = bbox;  // 全局变量
+        const offsetX = currentBbox ? currentBbox[0] : 0;
+        const offsetY = currentBbox ? currentBbox[1] : 0;
+        console.log('bbox 偏移:', offsetX, offsetY);
         
         // 创建模态框
         const modal = document.createElement('div');
@@ -291,28 +297,28 @@ async function showImageWithMatches(imgUrl, matches) {
         modal.style.justifyContent = 'center';
         modal.style.alignItems = 'center';
         
-        // 计算合适的显示尺寸（两张图并排，各占一半宽度）
-        const maxWidth = Math.min(window.innerWidth * 0.4, queryImg.width);
-        const maxHeight = window.innerHeight * 0.7;
+        // 固定显示高度
+        const maxHeight = 600;
+        const scaleQuery = maxHeight / queryImg.height;
+        const scaleDb = maxHeight / dbImg.height;
         
-        const scale = Math.min(maxWidth / queryImg.width, maxHeight / queryImg.height);
-        const displayWidth = queryImg.width * scale;
-        const displayHeight = queryImg.height * scale;
+        const displayWidthQuery = queryImg.width * scaleQuery;
+        const displayWidthDb = dbImg.width * scaleDb;
+        const displayHeight = maxHeight;
         
-        // 创建 Canvas（宽度为两张图宽度之和 + 间距）
-        const gap = 60;  // 两张图之间的间距
+        const gap = 60;
         const canvas = document.createElement('canvas');
-        canvas.width = displayWidth * 2 + gap;
+        canvas.width = displayWidthQuery + displayWidthDb + gap;
         canvas.height = displayHeight;
         const ctx = canvas.getContext('2d');
         
         // 绘制查询图（左侧）
-        ctx.drawImage(queryImg, 0, 0, displayWidth, displayHeight);
+        ctx.drawImage(queryImg, 0, 0, displayWidthQuery, displayHeight);
         
         // 绘制匹配图（右侧）
-        ctx.drawImage(dbImg, displayWidth + gap, 0, displayWidth, displayHeight);
+        ctx.drawImage(dbImg, displayWidthQuery + gap, 0, displayWidthDb, displayHeight);
         
-        // 绘制连线（绿色线条）
+        // 绘制连线
         ctx.beginPath();
         ctx.strokeStyle = '#00ff00';
         ctx.lineWidth = 1.5;
@@ -320,18 +326,16 @@ async function showImageWithMatches(imgUrl, matches) {
         let matchCount = 0;
         let drawnCount = 0;
         for (let pt of matches) {
-            // 获取查询图关键点坐标（需要缩放）
-            let qx = pt.query[0] * scale;
-            let qy = pt.query[1] * scale;
+            // ========== 关键：查询图坐标加上 bbox 偏移 ==========
+            let qx = (pt.query[0] + offsetX) * scaleQuery;
+            let qy = (pt.query[1] + offsetY) * scaleQuery;
             
-            // 获取匹配图关键点坐标（需要缩放 + 右移）
-            let dx = pt.db[0] * scale + displayWidth + gap;
-            let dy = pt.db[1] * scale;
+            let dx = pt.db[0] * scaleDb + displayWidthQuery + gap;
+            let dy = pt.db[1] * scaleDb;
 
-            // 检查坐标是否在画布范围内
-            const isValid = qx >= 0 && qx <= displayWidth && 
+            const isValid = qx >= 0 && qx <= displayWidthQuery && 
                             qy >= 0 && qy <= displayHeight &&
-                            dx >= displayWidth + gap && dx <= canvas.width &&
+                            dx >= displayWidthQuery + gap && dx <= canvas.width &&
                             dy >= 0 && dy <= displayHeight;
             
             if (!isValid) {
@@ -350,37 +354,39 @@ async function showImageWithMatches(imgUrl, matches) {
         }
         console.log(`总匹配点: ${matchCount}, 实际画线: ${drawnCount}`);
         
-        // 绘制关键点（查询图上画红色，匹配图上画绿色）
-        // 查询图上的关键点（红色）
+        // 绘制关键点（红色，查询图）
         ctx.fillStyle = '#ff0000';
         for (let pt of matches.slice(0, 100)) {
-            let x = pt.query[0] * scale;
-            let y = pt.query[1] * scale;
-            ctx.beginPath();
-            ctx.arc(x, y, 2, 0, 2 * Math.PI);
-            ctx.fill();
+            // ========== 关键：查询图坐标加上 bbox 偏移 ==========
+            let x = (pt.query[0] + offsetX) * scaleQuery;
+            let y = (pt.query[1] + offsetY) * scaleQuery;
+            if (x >= 0 && x <= displayWidthQuery && y >= 0 && y <= displayHeight) {
+                ctx.beginPath();
+                ctx.arc(x, y, 2, 0, 2 * Math.PI);
+                ctx.fill();
+            }
         }
         
-        // 匹配图上的关键点（绿色）
+        // 绘制关键点（绿色，匹配图）
         ctx.fillStyle = '#00ff00';
         for (let pt of matches.slice(0, 100)) {
-            let x = pt.db[0] * scale + displayWidth + gap;
-            let y = pt.db[1] * scale;
-            ctx.beginPath();
-            ctx.arc(x, y, 2, 0, 2 * Math.PI);
-            ctx.fill();
+            let x = pt.db[0] * scaleDb + displayWidthQuery + gap;
+            let y = pt.db[1] * scaleDb;
+            if (x >= displayWidthQuery + gap && x <= canvas.width && y >= 0 && y <= displayHeight) {
+                ctx.beginPath();
+                ctx.arc(x, y, 2, 0, 2 * Math.PI);
+                ctx.fill();
+            }
         }
         
         // 添加文字标注
         ctx.fillStyle = '#ffffff';
         ctx.font = '16px Arial';
         ctx.fillText('查询图', 10, 30);
-        ctx.fillText('匹配结果', displayWidth + gap + 10, 30);
-        
-        // 显示匹配点数量
+        ctx.fillText('匹配结果', displayWidthQuery + gap + 10, 30);
         ctx.font = '12px Arial';
         ctx.fillStyle = '#00ff00';
-        ctx.fillText(`匹配点: ${matches.length} 个`, displayWidth + gap + 10, 60);
+        ctx.fillText(`匹配点: ${matches.length} 个`, displayWidthQuery + gap + 10, 60);
         
         modal.appendChild(canvas);
         
@@ -432,3 +438,246 @@ document.addEventListener('DOMContentLoaded', function() {
         optionsDiv.style.display = showCheckbox.checked ? 'block' : 'none';
     }
 });
+
+// ========== Bounding Box 框选功能 ==========
+let bbox = null;  // 存储 [xmin, ymin, xmax, ymax]
+let isDrawing = false;
+let startX, startY;
+
+const previewArea = document.getElementById('previewArea');
+const previewCanvas = document.getElementById('previewCanvas');
+const clearBboxBtn = document.getElementById('clearBboxBtn');
+const bboxStatus = document.getElementById('bboxStatus');
+
+// 图片上传后，初始化 Canvas
+if (fileInput) {
+    const originalFileInput = fileInput.cloneNode(true);
+    fileInput.addEventListener('change', function(e) {
+        let file = e.target.files[0];
+        if (!file) return;
+        
+        let url = URL.createObjectURL(file);
+        preImg.src = url;
+        preImg.style.display = 'block';
+        emptyTip.style.display = 'none';
+        
+        // 等待图片加载完成后初始化 Canvas
+        preImg.onload = function() {
+            initCanvas();
+        };
+    });
+}
+
+function initCanvas() {
+    // 获取显示区域尺寸
+    const containerRect = previewArea.getBoundingClientRect();
+    const maxWidth = containerRect.width - 20;
+    const maxHeight = containerRect.height - 20;
+    
+    // 计算缩放比例
+    const scale = Math.min(maxWidth / preImg.naturalWidth, maxHeight / preImg.naturalHeight);
+    const displayWidth = preImg.naturalWidth * scale;
+    const displayHeight = preImg.naturalHeight * scale;
+    
+    previewCanvas.width = preImg.naturalWidth;
+    previewCanvas.height = preImg.naturalHeight;
+    previewCanvas.style.width = displayWidth + 'px';
+    previewCanvas.style.height = displayHeight + 'px';
+    previewCanvas.style.position = 'absolute';
+    previewCanvas.style.top = '50%';
+    previewCanvas.style.left = '50%';
+    previewCanvas.style.transform = 'translate(-50%, -50%)';
+    
+    previewCanvas.style.display = 'block';
+    preImg.style.visibility = 'hidden';
+    
+    const ctx = previewCanvas.getContext('2d');
+    ctx.drawImage(preImg, 0, 0, previewCanvas.width, previewCanvas.height);
+    
+    bindCanvasEvents();
+}
+
+function bindCanvasEvents() {
+    previewCanvas.addEventListener('mousedown', onMouseDown);
+    previewCanvas.addEventListener('mousemove', onMouseMove);
+    previewCanvas.addEventListener('mouseup', onMouseUp);
+}
+function onMouseUp(e) {
+    if (!isDrawing) return;
+    isDrawing = false;
+    
+    const rect = previewCanvas.getBoundingClientRect();
+    const scaleX = previewCanvas.width / rect.width;
+    const scaleY = previewCanvas.height / rect.height;
+    
+    const endX = (e.clientX - rect.left) * scaleX;
+    const endY = (e.clientY - rect.top) * scaleY;
+    
+    // 计算 bbox
+    const xmin = Math.min(startX, endX);
+    const ymin = Math.min(startY, endY);
+    const xmax = Math.max(startX, endX);
+    const ymax = Math.max(startY, endY);
+    
+    // 框至少要有 5 像素
+    if (xmax - xmin > 5 && ymax - ymin > 5) {
+        bbox = [Math.floor(xmin), Math.floor(ymin), Math.floor(xmax), Math.floor(ymax)];
+        bboxStatus.innerText = `已框选区域: (${bbox[0]}, ${bbox[1]}) → (${bbox[2]}, ${bbox[3]})`;
+        clearBboxBtn.style.display = 'inline-block';
+        
+        // 绘制最终框（绿色）
+        drawFinalBbox();
+    } else {
+        // 框太小，清除临时框
+        redrawCanvas();
+    }
+}
+
+function drawFinalBbox() {
+    const ctx = previewCanvas.getContext('2d');
+    ctx.drawImage(preImg, 0, 0, previewCanvas.width, previewCanvas.height);
+    
+    if (bbox) {
+        ctx.strokeStyle = '#00ff00';
+        ctx.fillStyle = 'rgba(0, 255, 0, 0.2)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([]);
+        ctx.strokeRect(bbox[0], bbox[1], bbox[2] - bbox[0], bbox[3] - bbox[1]);
+        ctx.fillRect(bbox[0], bbox[1], bbox[2] - bbox[0], bbox[3] - bbox[1]);
+    }
+}
+
+function onMouseDown(e) {
+    const rect = previewCanvas.getBoundingClientRect();
+    const scaleX = previewCanvas.width / rect.width;
+    const scaleY = previewCanvas.height / rect.height;
+    
+    startX = (e.clientX - rect.left) * scaleX;
+    startY = (e.clientY - rect.top) * scaleY;
+    isDrawing = true;
+}
+
+function onMouseMove(e) {
+    if (!isDrawing) return;
+    
+    const rect = previewCanvas.getBoundingClientRect();
+    const scaleX = previewCanvas.width / rect.width;
+    const scaleY = previewCanvas.height / rect.height;
+    
+    const currentX = (e.clientX - rect.left) * scaleX;
+    const currentY = (e.clientY - rect.top) * scaleY;
+    
+    // 改为调用 drawTempRect，直接画临时框
+    drawTempRect(currentX, currentY);
+}
+
+function drawTempRect(currentX, currentY) {
+    const ctx = previewCanvas.getContext('2d');
+    // 重绘原图
+    ctx.drawImage(preImg, 0, 0, previewCanvas.width, previewCanvas.height);
+    // 绘制已有 bbox
+    if (bbox) {
+        ctx.strokeStyle = '#00ff00';
+        ctx.fillStyle = 'rgba(0, 255, 0, 0.2)';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(bbox[0], bbox[1], bbox[2] - bbox[0], bbox[3] - bbox[1]);
+        ctx.fillRect(bbox[0], bbox[1], bbox[2] - bbox[0], bbox[3] - bbox[1]);
+    }
+    // 绘制临时框（红色虚线）
+    ctx.strokeStyle = '#ff3333';
+    ctx.fillStyle = 'rgba(255, 51, 51, 0.1)';  // 浅红色半透明填充
+    ctx.lineWidth = 3;
+    ctx.setLineDash([]);  // 改成实线，更明显
+    ctx.strokeRect(startX, startY, currentX - startX, currentY - startY);
+    ctx.fillRect(startX, startY, currentX - startX, currentY - startY);
+}
+
+function redrawCanvas(currentX = null, currentY = null) {
+    const ctx = previewCanvas.getContext('2d');
+    // 重绘原图
+    ctx.drawImage(preImg, 0, 0, previewCanvas.width, previewCanvas.height);
+    
+    // 绘制已有 bbox
+    if (bbox) {
+        ctx.strokeStyle = '#00ff00';
+        ctx.fillStyle = 'rgba(0, 255, 0, 0.2)';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(bbox[0], bbox[1], bbox[2] - bbox[0], bbox[3] - bbox[1]);
+        ctx.fillRect(bbox[0], bbox[1], bbox[2] - bbox[0], bbox[3] - bbox[1]);
+    }
+    
+    // 绘制临时框
+    if (currentX !== null && currentY !== null && startX !== undefined) {
+        ctx.strokeStyle = '#ff0000';
+        ctx.setLineDash([5, 5]);
+        ctx.strokeRect(startX, startY, currentX - startX, currentY - startY);
+        ctx.setLineDash([]);
+    }
+}
+
+function drawBbox() {
+    redrawCanvas();
+}
+
+// 清除框选
+if (clearBboxBtn) {
+    clearBboxBtn.addEventListener('click', function() {
+        bbox = null;
+        bboxStatus.innerText = '';
+        clearBboxBtn.style.display = 'none';
+        redrawCanvas();
+    });
+}
+
+// 修改 performSearch 函数，添加 bbox 参数
+async function performSearch() {
+    if (!preImg.src || preImg.style.display === 'none') {
+        alert('请先上传图片');
+        return;
+    }
+
+    const topK = sliderN ? parseInt(sliderN.value) : 4;
+    const threshold = sliderTh ? parseFloat(sliderTh.value) : 5.0;
+
+    resultBox.innerHTML = `<div class="empty-result">检索中，请稍候...</div>`;
+
+    const file = fileInput.files[0];
+    if (!file) {
+        alert('请选择图片文件');
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('image', file);
+    formData.append('top_k', topK);
+    formData.append('threshold', threshold);
+    
+    // 添加 bbox（如果有）
+    if (bbox) {
+        formData.append('bbox', JSON.stringify(bbox));
+    }
+
+    const startTime = performance.now();
+
+    try {
+        const response = await fetch('/search', {
+            method: 'POST',
+            body: formData
+        });
+
+        const endTime = performance.now();
+        const elapsed = ((endTime - startTime) / 1000).toFixed(2);
+
+        const data = await response.json();
+
+        if (data.success) {
+            const showTime = document.getElementById('showTime').checked;
+            displayResults(data.results, showTime ? elapsed : null);
+        } else {
+            resultBox.innerHTML = `<div class="empty-result">检索失败: ${data.error || '未知错误'}</div>`;
+        }
+    } catch (error) {
+        console.error('检索出错:', error);
+        resultBox.innerHTML = `<div class="empty-result">网络错误，请稍后重试</div>`;
+    }
+}
