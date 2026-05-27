@@ -27,7 +27,7 @@ def search():
     if 'image' not in request.files:
         return jsonify({'success': False,'error': '未收到图片'})
     
-    file = request.files['image']
+    file=request.files['image']
     if file.filename=='':
         return jsonify({'success': False,'error': '未选择文件'})
     
@@ -36,8 +36,8 @@ def search():
     threshold=float(request.form.get('threshold',5.0)) 
 
     # 保存临时文件
-    suffix = os.path.splitext(file.filename)[1] or '.jpg'
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+    suffix=os.path.splitext(file.filename)[1] or '.jpg'
+    with tempfile.NamedTemporaryFile(suffix=suffix,delete=False) as tmp:
         file.save(tmp.name)
         tmp_path=tmp.name
 

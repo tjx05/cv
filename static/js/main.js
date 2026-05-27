@@ -39,7 +39,7 @@ if (fileInput) {
     });
 }
 
-// ========== 新增：防抖函数 ==========
+// 防抖函数
 function debounce(func, wait) {
     let timeout;
     return function executedFunction(...args) {
@@ -52,7 +52,7 @@ function debounce(func, wait) {
     };
 }
 
-// ========== 新增：将检索逻辑抽成独立函数 ==========
+// 将检索逻辑抽成独立函数
 async function performSearch() {
     if (!preImg.src || preImg.style.display === 'none') {
         alert('请先上传图片');
@@ -100,7 +100,7 @@ async function performSearch() {
     }
 }
 
-// ========== 新增：阈值滑块防抖自动检索 ==========
+// 阈值滑块防抖自动检索
 if (sliderTh) {
     const debounceSearch = debounce(performSearch, 500);
     sliderTh.oninput = function() {
@@ -112,7 +112,7 @@ if (sliderTh) {
     };
 }
 
-// 修改搜索按钮，复用 performSearch
+// 搜索按钮
 if (searchBtn) {
     searchBtn.addEventListener('click', async () => {
         await performSearch();
@@ -195,9 +195,9 @@ function displayResults(results, elapsedTime) {
     });
 }
 
-// 新增：普通显示大图（不显示关键点）
+// 普通显示大图（不显示关键点）
 function showImage(imgUrl) {
-    console.log('加载图片:', imgUrl);  // 看控制台输出
+    console.log('加载图片:', imgUrl); 
     
     const modal = document.createElement('div');
     modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:10000;display:flex;justify-content:center;align-items:center';
@@ -328,7 +328,7 @@ async function showImageWithMatches(imgUrl, matches) {
             let dx = pt.db[0] * scale + displayWidth + gap;
             let dy = pt.db[1] * scale;
 
-            // 调试：检查坐标是否在画布范围内
+            // 检查坐标是否在画布范围内
             const isValid = qx >= 0 && qx <= displayWidth && 
                             qy >= 0 && qy <= displayHeight &&
                             dx >= displayWidth + gap && dx <= canvas.width &&

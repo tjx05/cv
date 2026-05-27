@@ -191,7 +191,7 @@ input[type="range"] {
     color: #666;
 }
 
-/* 外层容器：一行、等宽 */
+/* 外层容器 */
 .kp-options {
     margin: 8px 0 0 24px;
     display: flex;
@@ -203,9 +203,9 @@ input[type="range"] {
     display: none;
 }
 
-/* 按钮基础：一样宽、微圆角 */
+/* 按钮 */
 .kp-btn {
-    flex: 1;               /* 两个一样宽 */
+    flex: 1;               
     text-align: center;
     padding: 5px 12px;
     border-radius: 6px;   /* 微微圆角 */
@@ -225,7 +225,6 @@ input[type="range"] {
     font-weight: 500;
 }
 
-/* hover 轻微反馈 */
 .kp-btn:hover {
     border-color: #bbb;
 }
