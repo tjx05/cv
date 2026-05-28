@@ -18,12 +18,13 @@ class RootSIFTExtractor:
         self.sift=cv2.SIFT_create(nfeatures=max_features)
         self.use_rootsift=use_rootsift
 
-    def extract(self,image_path,bbox=None):
+    def extract(self,image_path,bbox=None,multi_scale=False):
         """
         从指定图像提取特征；如果提供了bbox，则只在目标区域内提取
         输入：
             image_path: 图像路径
             bbox: [xmin,ymin,xmax,ymax] 用于查询图像的精准去噪
+            multi_scale: 是否开启多尺度特征提取
         输出：
             (keypoints,descriptors)
         """
@@ -49,12 +50,43 @@ class RootSIFTExtractor:
             if image.size==0:
                 print(f"警告: {image_path} 的bbox裁剪区域无效")
                 return [],None
+            
+        # ========== 多尺度特征提取 ==========
+        if multi_scale:
+            scales = [1.0, 0.8]  # 多尺度
+            all_kps = []
+            all_descs = []
+            
+            for scale in scales:
+                if scale == 1.0:
+                    img_scaled = image
+                else:
+                    new_w = int(image.shape[1] * scale)
+                    new_h = int(image.shape[0] * scale)
+                    img_scaled = cv2.resize(image, (new_w, new_h))
+                
+                kps, descs = self.sift.detectAndCompute(img_scaled, None)
+                
+                if descs is not None and len(kps) > 0:
+                    # 关键点坐标缩回原图尺度
+                    if scale != 1.0:
+                        for kp in kps:
+                            kp.pt = (kp.pt[0] / scale, kp.pt[1] / scale)
+                    all_kps.extend(kps)
+                    all_descs.append(descs)
+            
+            if not all_descs:
+                return [], None
+            
+            descs = np.vstack(all_descs)
+            kps = all_kps
 
-        # 提取关键点和原始SIFT描述子
-        kps,descs=self.sift.detectAndCompute(image,None)
+        else:
+            # 提取关键点和原始SIFT描述子
+            kps,descs=self.sift.detectAndCompute(image,None)
 
-        if descs is None or len(kps)==0:
-            return [],None
+            if descs is None or len(kps)==0:
+                return [],None
 
         # RootSIFT优化
         if self.use_rootsift:

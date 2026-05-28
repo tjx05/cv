@@ -78,7 +78,7 @@ def execute_ransac_rerank(top_candidates,query_kps,query_descs,return_matches=Fa
     reranked_list.sort(key=lambda x: (x[1],x[2]),reverse=True)
     return reranked_list
 
-def ransac_aqe_ultimate_retrieval(top_k_expand=5):
+def ransac_aqe_ultimate_retrieval(top_k_expand=7):
     print("加载引擎数据 (VOCAB, INDEX, GT)...")
     with open(VOCAB_PATH,'rb') as f: 
         kmeans=pickle.load(f)
@@ -101,7 +101,7 @@ def ransac_aqe_ultimate_retrieval(top_k_expand=5):
         query_img_path=os.path.join(IMAGE_DIR,query_img_name)
         
         # 提取原始查询特征
-        kps,descs=extractor.extract(query_img_path,bbox=bbox)
+        kps,descs=extractor.extract(query_img_path,bbox=bbox,multi_scale=True)
         if descs is None: 
             continue
         query_kps=np.array([kp.pt for kp in kps],dtype=np.float32)
@@ -114,7 +114,8 @@ def ransac_aqe_ultimate_retrieval(top_k_expand=5):
             
         # 阶段1：初次BoW检索
         initial_candidates = execute_bow_search(original_query_weights, inverted_index, image_norms, TOP_N_PREFILTER)
-        if not initial_candidates: continue
+        if not initial_candidates: 
+            continue
             
         # 阶段2：第一次RANSAC
         ransac1_results = execute_ransac_rerank(initial_candidates, query_kps, descs)
@@ -148,7 +149,7 @@ def ransac_aqe_ultimate_retrieval(top_k_expand=5):
     print(f"RANSAC+AQE融合，最终mAP得分: {mAP_score:.4f}")
 
 
-def search_single_query(query_img_path,bbox=None,top_k_expand=5,final_top_n=100,ransac_thresh=5.0):
+def search_single_query(query_img_path,bbox=None,top_k_expand=7,final_top_n=100,ransac_thresh=5.0):
     """
     单张图片检索接口
     """
@@ -162,7 +163,7 @@ def search_single_query(query_img_path,bbox=None,top_k_expand=5,final_top_n=100,
 
     extractor=RootSIFTExtractor(max_features=SIFT_MAX_FEATURES,use_rootsift=USE_ROOT_SIFT)
     # 提取特征
-    kps, descs = extractor.extract(query_img_path,bbox=bbox)
+    kps, descs = extractor.extract(query_img_path,bbox=bbox,multi_scale=True)
     if descs is None:
         return []
     
@@ -207,5 +208,5 @@ def search_single_query(query_img_path,bbox=None,top_k_expand=5,final_top_n=100,
     
     return final_results[:final_top_n]
 
-# if __name__ == '__main__':
-#     ransac_aqe_ultimate_retrieval()
+if __name__ == '__main__':
+    ransac_aqe_ultimate_retrieval()
