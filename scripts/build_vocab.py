@@ -1,91 +1,69 @@
 import os
+
+# ==========================================
+# 环境变量设置 (必须在导入 numpy 前执行)
+# ==========================================
 os.environ["OMP_NUM_THREADS"] = "32"
 os.environ["OPENBLAS_NUM_THREADS"] = "24"  # ✅ 修复OpenBLAS警告，从32改为24
 os.environ["MKL_NUM_THREADS"] = "32"
 
 import glob
 import numpy as np
-import pickle
-from sklearn.cluster import MiniBatchKMeans
 from tqdm import tqdm
 import sys
 
+# 将工程根目录加入系统路径
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, BASE_DIR)
+
 from config import FEATURES_DIR, VOCAB_PATH, VOCAB_SIZE_K, KMEANS_SAMPLE_RATE, KMEANS_BATCH_SIZE
+from model.minibatchKMeans import CustomMiniBatchKMeans
 
-
-def train_visual_vocabulary(features_dir, vocab_path, vocab_size, sample_rate):
-
+def load_and_sample_features(features_dir, sample_rate):
+    """
+    负责从磁盘读取特征文件并进行降采样
+    """
     npy_files = glob.glob(os.path.join(features_dir, '*.npy'))
     print(f"找到 {len(npy_files)} 个特征文件")
 
-    # 1. 加载特征
     sampled_features = []
     for npy_file in tqdm(npy_files, desc="加载特征"):
         try:
             descs = np.load(npy_file)
             if len(descs) == 0:
                 continue
+            # 计算采样数量
             n = max(1, int(len(descs) * sample_rate))
             idx = np.random.choice(len(descs), n, replace=False)
             sampled_features.append(descs[idx])
         except Exception as e:
             print(f"跳过 {npy_file}: {e}")
 
+    # 将所有采样到的特征拼接成一个巨大的特征矩阵
     all_features = np.vstack(sampled_features).astype(np.float32)
     print(f"特征总数: {len(all_features)}，内存: {all_features.nbytes/1024**3:.2f} GB")
+    return all_features
 
-    # 2. 聚类
-    print(f"\n🚀 开始聚类 K={vocab_size}...")
-    kmeans = MiniBatchKMeans(
-        n_clusters=vocab_size,
+def main():
+    print(f"K={VOCAB_SIZE_K}, 采样率={KMEANS_SAMPLE_RATE}, batch={KMEANS_BATCH_SIZE}")
+
+    # 1. 业务逻辑：加载与清洗数据
+    all_features = load_and_sample_features(FEATURES_DIR, KMEANS_SAMPLE_RATE)
+
+    # 2. 算法调用：初始化 KMeans 模型
+    print(f"\n🚀 开始初始化聚类引擎...")
+    vocab_model = CustomMiniBatchKMeans(
+        vocab_size=VOCAB_SIZE_K,
         batch_size=KMEANS_BATCH_SIZE,
-        init='random',
-        n_init=1,
-        max_iter=100,
-        max_no_improvement=10,
-        tol=0.0,
-        verbose=0,
-        random_state=42,
-        compute_labels=False,
-        reassignment_ratio=0.01
+        n_epochs=3  # 过3遍数据，质量接近全局 fit()
     )
 
-    n_samples = len(all_features)
-    n_batches = int(np.ceil(n_samples / KMEANS_BATCH_SIZE))
-    N_EPOCHS = 3  # 过3遍数据，质量接近 fit()
+    # 3. 算法调用：执行训练
+    vocab_model.train(all_features)
 
-    with tqdm(total=n_batches * N_EPOCHS, desc=f"🔧 KMeans聚类 K={vocab_size}", unit="batch") as pbar:
-        for epoch in range(N_EPOCHS):
-            shuffle_idx = np.random.permutation(n_samples)
-            shuffled = all_features[shuffle_idx]
-
-            for i in range(n_batches):
-                start = i * KMEANS_BATCH_SIZE
-                end = min(start + KMEANS_BATCH_SIZE, n_samples)
-                batch = shuffled[start:end]
-                kmeans.partial_fit(batch)
-
-                if hasattr(kmeans, 'inertia_'):
-                    pbar.set_postfix({
-                        'epoch': f'{epoch+1}/{N_EPOCHS}',
-                        'inertia': f'{kmeans.inertia_:.4f}'
-                    })
-                pbar.update(1)
-
-    # 3. 保存
-    os.makedirs(os.path.dirname(vocab_path), exist_ok=True)
-    with open(vocab_path, 'wb') as f:
-        pickle.dump(kmeans, f)
-    print(f"\n🎉 词典已保存至 {vocab_path}")
-
+    # 4. 数据持久化：保存结果
+    vocab_model.save(VOCAB_PATH)
+    print(f"\n🎉 词典已成功保存至: {VOCAB_PATH}")
 
 if __name__ == '__main__':
-    print(f"K={VOCAB_SIZE_K}, 采样率={KMEANS_SAMPLE_RATE}, batch={KMEANS_BATCH_SIZE}")
-    train_visual_vocabulary(
-        features_dir=FEATURES_DIR,
-        vocab_path=VOCAB_PATH,
-        vocab_size=VOCAB_SIZE_K,
-        sample_rate=KMEANS_SAMPLE_RATE
-    )
+    main()
