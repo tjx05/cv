@@ -1,6 +1,7 @@
 # cv
 cv课设——图像检索
 
+```
  Image-Retrieval-System
  ┣  data/                 # 1. 数据驱动层 (Data Layer)
  ┃ ┣  gt_files_170407/    # 官方原始 Ground Truth 文本标注数据
@@ -30,8 +31,18 @@ cv课设——图像检索
  ┣ outputs/              # 5. 缓存与产出层 (Outputs)
  ┃ ┗ (自动生成)              # 存放生成的 .npy 特征、vocab.pkl、index.pkl 及最终可视化图片
  ┃
+ ┣  static/             # 静态资源：CSS、JS、图片等
+ ┃ ┣  css/              # CSS 样式文件
+ ┃ ┗  js/               # JavaScript 脚本文件
+ ┃
+ ┣  templates/             
+ ┃ ┗  index.html         # HTML 模板：用户交互界面    
+ ┃
+ ┣  app.py
+ ┃
  ┣  config.py             # 6. 全局配置中心 (Configuration)
  ┗  zj.ipynb              # 7. 实验草稿本 (Jupyter Notebook 探针测试)
+ ```
 
  ## 快速开始
 ```bash

@@ -29,8 +29,8 @@ def load_and_sample_features(features_dir, sample_rate):
     sampled_features = []
     for npy_file in tqdm(npy_files, desc="加载特征"):
         try:
-            descs = np.load(npy_file)
-            if len(descs) == 0:
+            descs=np.load(npy_file)
+            if len(descs)==0:
                 continue
             # 计算采样数量
             n = max(1, int(len(descs) * sample_rate))
