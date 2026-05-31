@@ -10,35 +10,16 @@ import sys
 BASE_DIR=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0,BASE_DIR)
 
-from config import IMAGE_DIR,VOCAB_PATH,INDEX_PATH,PARSED_GT_PATH,SIFT_MAX_FEATURES,USE_ROOT_SIFT
+# 💡 增加导入 TOP_N_PREFILTER 以适配 execute_bow_search 的参数
+from config import IMAGE_DIR,VOCAB_PATH,INDEX_PATH,PARSED_GT_PATH,SIFT_MAX_FEATURES,USE_ROOT_SIFT, TOP_N_PREFILTER
 from model.ROOTSIFT_feature import RootSIFTExtractor
 from tools.evaluate_map import evaluate_system
 
-def execute_search(query_weights,inverted_index,image_norms):
-    """
-    基础的倒排索引查询函数：传入权重向量，返回按分数排序的图片列表
-    """
-    scores=defaultdict(float)
-    query_norm_sq=sum(w**2 for w in query_weights.values())
-    query_norm=math.sqrt(query_norm_sq)
-    
-    if query_norm==0:
-        return []
+# 👉 [核心修改点 1]：导入底层的核心算子，消除冗余代码
+from model.TFIDF_Engine import execute_bow_search, compute_query_weights
+from model.AQE import average_query_expansion
 
-    # 余弦相似度分子：点积累加
-    for w,q_weight in query_weights.items():
-        if w in inverted_index:
-            for db_img,db_weight in inverted_index[w].items():
-                scores[db_img]+=q_weight*db_weight
-                
-    # 余弦相似度分母：长度归一化
-    final_scores={}
-    for db_img,dot_product in scores.items():
-        db_norm=image_norms.get(db_img,1.0)
-        final_scores[db_img]=dot_product/(query_norm*db_norm)
-        
-    # 按分数降序排序
-    return sorted(final_scores.items(),key=lambda x:x[1],reverse=True)
+# ✂️ [核心修改点 2]：删除了原本堆在这里的 def execute_search(...) 函数
 
 def aqe_retrieval(top_k_expand=5):
     print("加载词典与倒排索引……")
@@ -67,52 +48,38 @@ def aqe_retrieval(top_k_expand=5):
         if descs is None: 
             continue
             
-        words=kmeans.predict(descs)
-        query_tf=defaultdict(int)
-        for w in words: 
-            query_tf[w]+=1
+        # 👉 [核心修改点 3]：调用封装函数计算原始查询的 TF-IDF 权重向量
+        original_query_weights = compute_query_weights(descs, kmeans, idf)
             
-        # 构建原始查询的 TF-IDF 权重向量
-        original_query_weights={}
-        for w, tf in query_tf.items():
-            original_query_weights[w]=tf*idf[w]
-            
-        # 第一次检索
-        initial_ranking=execute_search(original_query_weights,inverted_index,image_norms)
+        # 👉 [核心修改点 4]：第一次检索，调用统一的倒排查询接口
+        initial_ranking = execute_bow_search(original_query_weights, inverted_index, image_norms, TOP_N_PREFILTER)
         
         # 如果什么都没搜到，直接跳过
         if not initial_ranking:
             system_results[query_name]=[]
             continue
             
-        # AQE 核心逻辑
-        # 提取第一次检索排名前K的图片名（即盲目信任它们是对的）
+        # AQE 核心逻辑: 提取第一次检索排名前K的图片名（即盲目信任它们是对的）
         top_k_imgs=[img for img,score in initial_ranking[:top_k_expand]]
         
-        # 复制一份原始查询向量，准备进行特征融合
-        expanded_weights=original_query_weights.copy()
-        
-        # 遍历倒排表，把这K张图的特征全部“吸”过来，取平均后加到查询向量上
-        for w,db_docs in inverted_index.items():
-            sum_expanded_weight=0.0
-            for img in top_k_imgs:
-                if img in db_docs:
-                    sum_expanded_weight+=db_docs[img]
-            
-            if sum_expanded_weight>0:
-                # 公式：Q_new=Q_old+(Sum(D_1...D_k)/K)
-                expanded_weights[w]=expanded_weights.get(w,0)+(sum_expanded_weight/top_k_expand)
+        # 👉 [核心修改点 5]：直接调用独立封装好的 AQE 聚合算法
+        expanded_weights = average_query_expansion(
+            original_query_weights,
+            top_k_imgs,
+            inverted_index,
+            top_k_expand=top_k_expand
+        )
                 
-        # 第二次检索
-        final_ranking=execute_search(expanded_weights,inverted_index,image_norms)
+        # 👉 [核心修改点 6]：第二次检索，由于最终只存前 100 名，这里直接让引擎返回 top_n=100
+        final_ranking = execute_bow_search(expanded_weights, inverted_index, image_norms, top_n=100)
         
         # 保存重排后的纯图片名列表
-        system_results[query_name]=[f"{img}.jpg" for img,score in final_ranking[:100]]
+        system_results[query_name]=[f"{img}.jpg" for img,score in final_ranking]
         
     print("\n正在计算mAP分数……")
     mAP_score=evaluate_system(PARSED_GT_PATH,system_results)
     
     print(f"AQE扩展系统构建完毕，最终mAP得分:{mAP_score:.4f}")
 
-# if __name__ == '__main__':
-#     aqe_retrieval(top_k_expand=5)
+if __name__ == '__main__':
+    aqe_retrieval(top_k_expand=5)
