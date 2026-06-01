@@ -3,7 +3,7 @@ import cv2
 
 def pure_python_ransac_homography(src_pts, dst_pts, threshold=5.0, max_iters=1000):
     """
-    返回: 最大内点数量
+    返回: 最大内点数量 
     """
     num_pts = len(src_pts)
     best_inliers = 0

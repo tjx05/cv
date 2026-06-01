@@ -12,7 +12,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, BASE_DIR)
 
 from config import IMAGE_DIR, VOCAB_PATH, INDEX_PATH, PARSED_GT_PATH, FEATURES_DIR, KEYPOINTS_DIR
-from config import SIFT_MAX_FEATURES, USE_ROOT_SIFT, TOP_N_PREFILTER, RANSAC_REPROJ_THRESHOLD,TOP_K_EXPAND
+from config import SIFT_MAX_FEATURES, USE_ROOT_SIFT, TOP_N_PREFILTER, RANSAC_REPROJ_THRESHOLD, TOP_K_EXPAND, MIN_INLIERS_REQUIRED
 from model.ROOTSIFT_feature import RootSIFTExtractor
 from tools.evaluate_map import evaluate_system
 
@@ -105,7 +105,11 @@ def ransac_aqe_ultimate_retrieval(top_k_expand=5):
         # ==========================================
         # 阶段 3: 调用独立 AQE 模块进行查询扩展
         # ==========================================
-        top_k_imgs_verified = [img for img, inl, score in ransac1_results[:TOP_K_EXPAND]]
+        # 修改后：过滤掉几何验证不达标的噪声线人
+        top_k_imgs_verified = [
+            img for img, inl, score in ransac1_results[:TOP_K_EXPAND]
+            if inl >= MIN_INLIERS_REQUIRED  # 内点数不足的线人直接丢弃
+        ]
         
         expanded_weights = average_query_expansion(
             original_query_weights,
@@ -134,6 +138,8 @@ def ransac_aqe_ultimate_retrieval(top_k_expand=5):
     print("==================================================")
     print(f"🏆 终局之战！纯手写 RANSAC + AQE 完美融合，最终 mAP 得分: {mAP_score:.4f}")
     print("==================================================")
+
+    return mAP_score
 
 if __name__ == '__main__':
     ransac_aqe_ultimate_retrieval()

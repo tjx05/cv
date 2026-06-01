@@ -4,3 +4,5 @@ outputs/*
 model/__pycache__/*
 tools/__pycache__/*
 zj.ipynb
+scripts/__pycache__
+run_batch_topn_with_time.py
