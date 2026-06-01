@@ -12,7 +12,7 @@ BASE_DIR=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0,BASE_DIR)
 
 from config import IMAGE_DIR,VOCAB_PATH,INDEX_PATH,PARSED_GT_PATH,FEATURES_DIR,KEYPOINTS_DIR
-from config import SIFT_MAX_FEATURES,USE_ROOT_SIFT,TOP_N_PREFILTER,RANSAC_REPROJ_THRESHOLD,TOP_K_EXPAND
+from config import SIFT_MAX_FEATURES,USE_ROOT_SIFT,TOP_N_PREFILTER,RANSAC_REPROJ_THRESHOLD,TOP_K_EXPAND,MIN_INLIERS_REQUIRED
 from model.ROOTSIFT_feature import RootSIFTExtractor
 from tools.evaluate_map import evaluate_system
 
@@ -115,7 +115,10 @@ def ransac_aqe_ultimate_retrieval(top_k_expand=TOP_K_EXPAND):
         
         # 阶段3：安全的AQE扩展
         # 提取经过RANSAC校验的前K张图
-        top_k_imgs_verified=[img for img,inl,score in ransac1_results[:top_k_expand]]
+        top_k_imgs_verified=[
+            img for img,inl,score in ransac1_results[:top_k_expand]
+            if inl>=MIN_INLIERS_REQUIRED # 内点数不足的线人直接丢弃
+        ]
         
         expanded_weights=average_query_expansion(
             original_query_weights,
