@@ -23,13 +23,14 @@ SIFT_MAX_FEATURES = 3000      # 每张图最多提取的特征点数量 (防内�
 USE_ROOT_SIFT = True          # 是否开启 RootSIFT
 
 # 词典与聚类参数 (Vocabulary & KMeans)
-VOCAB_SIZE_K = 5000         # 视觉词典大小 K 
+VOCAB_SIZE_K = 50000         # 视觉词典大小 K 
 KMEANS_BATCH_SIZE = 50000     # 小批量 K-Means 的 Batch 大小
 KMEANS_SAMPLE_RATE = 0.1      # 聚类时从 1200 万特征中随机采样的比例 (防内存溢出)
-
 
 
 # 检索与重排参数
 TOP_N_PREFILTER = 300         # 倒排索引初筛保留的前 N 张候选图
 RANSAC_REPROJ_THRESHOLD = 5.0 # RANSAC 内点容差阈值 (像素)
 MIN_INLIERS_REQUIRED = 10     # 认定为成功匹配的最少内点数
+
+TOP_K_EXPAND = 5              # 参与 AQE 特征融合的最高置信度图像数量

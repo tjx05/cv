@@ -13,6 +13,8 @@ sys.path.insert(0,BASE_DIR)
 from config import IMAGE_DIR,VOCAB_PATH,INDEX_PATH,PARSED_GT_PATH,SIFT_MAX_FEATURES,USE_ROOT_SIFT
 from model.ROOTSIFT_feature import RootSIFTExtractor
 
+from model.TFIDF_Engine import compute_query_weights, execute_bow_search
+
 # 导入评测工具
 try:
     from tools.evaluate_map import evaluate_system
@@ -33,47 +35,15 @@ def search_image(query_img_path,bbox,extractor,kmeans,index_data):
     if descs is None or len(descs)==0:
         return []
         
-    # 量化特征为视觉单词
-    words=kmeans.predict(descs)
-    
-    # 统计查询图的 TF
-    query_tf={}
-    for w in words:
-        query_tf[w]=query_tf.get(w,0)+1
-        
-    # 计算查询图的TF-IDF和向量长度
-    query_norm_sq=0.0
-    query_weights={}
-    for w,tf in query_tf.items():
-        weight=tf*idf[w]
-        query_weights[w]=weight
-        query_norm_sq+=weight**2
-    query_norm=math.sqrt(query_norm_sq)
-    
-    if query_norm==0:
-        return []
+    #计算 TF-IDF 权重
+    query_weights = compute_query_weights(descs, kmeans, idf)
 
-    # 利用倒排索引进行极速相似度计算
-    scores=defaultdict(float)
-    
-    # 遍历查询图里的每一个单词
-    for w,q_weight in query_weights.items():
-        # 如果这个单词在数据库里存在
-        if w in inverted_index:
-            # 遍历包含这个单词的所有数据库图片
-            for db_img,db_weight in inverted_index[w].items():
-                # 累加点积
-                scores[db_img]+=q_weight*db_weight
-                
-    # 余弦相似度归一化(除以查询图和数据库图的长度乘积)
-    final_scores={}
-    for db_img,dot_product in scores.items():
-        db_norm=image_norms.get(db_img,1.0)
-        final_scores[db_img]=dot_product/(query_norm*db_norm)
+    # 完成倒排极速检索
+    ranked_list = execute_bow_search(query_weights, inverted_index, image_norms, top_n=100)
         
-    # 按分数从高到低排序，截取Top-100作为召回结果
-    ranked_list=sorted(final_scores.items(),key=lambda x:x[1],reverse=True)
-    return [f"{img}.jpg" for img,score in ranked_list[:100]]
+    # 按分数从高到低排序，截取Top-100作为召回结果 (execute_bow_search已排好序)
+    return [f"{img}.jpg" for img, score in ranked_list]
+
 
 def run_baseline_evaluation():
     print("加载词典与倒排索引……")
@@ -106,5 +76,5 @@ def run_baseline_evaluation():
     
     print(f"Baseline系统构建完毕，最终mAP得分: {mAP_score:.4f}")
 
-# if __name__ == '__main__':
-#     run_baseline_evaluation()
+if __name__ == '__main__':
+    run_baseline_evaluation()

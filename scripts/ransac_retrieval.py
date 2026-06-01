@@ -1,20 +1,23 @@
 import os
 import json
 import pickle
-import math
 import numpy as np
 import cv2
 from tqdm import tqdm
-from collections import defaultdict
 import sys
 
 BASE_DIR=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0,BASE_DIR)
 
 from config import IMAGE_DIR,VOCAB_PATH,INDEX_PATH,PARSED_GT_PATH,FEATURES_DIR,KEYPOINTS_DIR
-from config import SIFT_MAX_FEATURES,USE_ROOT_SIFT,TOP_N_PREFILTER,RANSAC_REPROJ_THRESHOLD
+from config import SIFT_MAX_FEATURES,USE_ROOT_SIFT,TOP_N_PREFILTER,RANSAC_REPROJ_THRESHOLD,TOP_K_EXPAND
 from model.ROOTSIFT_feature import RootSIFTExtractor
 from tools.evaluate_map import evaluate_system
+
+# 倒排查询逻辑
+from model.TFIDF_Engine import compute_query_weights, execute_bow_search
+
+from model.RANSAC import pure_python_ransac_homography
 
 def geometric_verification(query_kps,query_descs,db_kps,db_descs):
     """
@@ -28,18 +31,18 @@ def geometric_verification(query_kps,query_descs,db_kps,db_descs):
     if len(matches)<4:
         return 0
         
-    # 提取匹配成功的点的(x, y)坐标
-    src_pts=np.float32([query_kps[m.queryIdx] for m in matches]).reshape(-1, 1, 2)
-    dst_pts=np.float32([db_kps[m.trainIdx] for m in matches]).reshape(-1, 1, 2)
+    # NumPy 矩阵运算，shape 必须是 (-1, 2)
+    src_pts=np.float32([query_kps[m.queryIdx] for m in matches]).reshape(-1, 2)
+    dst_pts=np.float32([db_kps[m.trainIdx] for m in matches]).reshape(-1, 2)
     
-    # 使用RANSAC计算单应性矩阵
-    # mask矩阵中1代表符合几何变换的内点，0代表杂点
-    M,mask=cv2.findHomography(src_pts,dst_pts,cv2.RANSAC,RANSAC_REPROJ_THRESHOLD)
+    # 调用手写的 RANSAC 进行内点裁决
+    inliers = pure_python_ransac_homography(
+        src_pts, 
+        dst_pts, 
+        threshold=RANSAC_REPROJ_THRESHOLD, 
+        max_iters=1000
+    )
     
-    if mask is None:
-        return 0
-        
-    inliers=int(np.sum(mask))
     return inliers
 
 def ransac_retrieval():
@@ -72,29 +75,11 @@ def ransac_retrieval():
         # 查询坐标点：直接从提取出的kps里拿
         query_kps=np.array([kp.pt for kp in kps],dtype=np.float32)
         
-        # 倒排索引初筛
-        words=kmeans.predict(descs)
-        query_tf=defaultdict(int)
-        for w in words: 
-            query_tf[w]+=1
-            
-        query_norm_sq=0.0
-        query_weights={}
-        for w,tf in query_tf.items():
-            weight=tf*idf[w]
-            query_weights[w]=weight
-            query_norm_sq+=weight**2
-        query_norm=math.sqrt(query_norm_sq)
+        # TF-IDF 权重计算
+        query_weights = compute_query_weights(descs, kmeans, idf)
         
-        scores=defaultdict(float)
-        for w,q_weight in query_weights.items():
-            if w in inverted_index:
-                for db_img,db_weight in inverted_index[w].items():
-                    scores[db_img]+=q_weight*db_weight
-                    
-        final_scores={img: dot/(query_norm*image_norms.get(img, 1.0)) for img,dot in scores.items()}
-        # 获取初筛的前N名
-        top_n_candidates=sorted(final_scores.items(),key=lambda x:x[1],reverse=True)[:TOP_N_PREFILTER]
+        # 倒排极速初筛
+        top_n_candidates = execute_bow_search(query_weights, inverted_index, image_norms, TOP_N_PREFILTER)
         
         # RANSAC重排序
         reranked_list=[]
